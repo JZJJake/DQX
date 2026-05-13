@@ -9,19 +9,31 @@ from processor import clean_and_format_text
 
 class AppContext:
     def __init__(self):
-        self.file_queue = []
+        self.file_queue = queue.Queue()
         self.gui = None
         self.processing_thread = None
         self.is_running = True
 
+        # We need a separate list just for UI representation since Queue doesn't expose contents safely
+        self.ui_queue_list = []
+
     def add_files(self, files):
         for f in files:
-            if f not in self.file_queue:
-                self.file_queue.append(f)
+            if f not in self.ui_queue_list:
+                self.ui_queue_list.append(f)
+                self.file_queue.put(f)
+        self.gui.update_queue_list(self.ui_queue_list)
         self._start_processing()
 
     def remove_queue(self):
-        self.file_queue.clear()
+        self.ui_queue_list.clear()
+        # Empty the queue
+        while not self.file_queue.empty():
+            try:
+                self.file_queue.get_nowait()
+            except queue.Empty:
+                break
+        self.gui.update_queue_list(self.ui_queue_list)
 
     def save_verified(self, title, text, output_dir):
         # Clean title for filesystem
@@ -42,9 +54,13 @@ class AppContext:
             self.processing_thread.start()
 
     def _process_queue(self):
-        while self.file_queue and self.is_running:
-            # We don't pop until we are done or fail, so GUI shows it's being processed
-            current_file = self.file_queue[0]
+        while self.is_running:
+            try:
+                current_file = self.file_queue.get(timeout=1.0)
+            except queue.Empty:
+                if not self.ui_queue_list:
+                    break # queue is empty, break out of loop
+                continue # loop and check is_running again
 
             logging.info(f"Processing: {current_file}")
             try:
@@ -52,7 +68,8 @@ class AppContext:
                 raw_text = parse_document(current_file)
                 if not raw_text:
                     logging.error(f"Skipping {current_file}: Empty text or parsing failed.")
-                    self._pop_and_update()
+                    self._pop_and_update(current_file)
+                    self.file_queue.task_done()
                     continue
 
                 # 2. Process with DeepSeek
@@ -66,14 +83,15 @@ class AppContext:
             except Exception as e:
                 logging.error(f"Error processing {current_file}: {e}")
 
-            self._pop_and_update()
+            self._pop_and_update(current_file)
+            self.file_queue.task_done()
 
-        logging.info("Batch processing finished.")
+        logging.info("Batch processing thread resting.")
 
-    def _pop_and_update(self):
-        if self.file_queue:
-            self.file_queue.pop(0)
-            self.gui.after(0, self.gui.update_queue_list, self.file_queue)
+    def _pop_and_update(self, current_file):
+        if current_file in self.ui_queue_list:
+            self.ui_queue_list.remove(current_file)
+            self.gui.after(0, self.gui.update_queue_list, self.ui_queue_list)
 
 def main():
     ctx = AppContext()

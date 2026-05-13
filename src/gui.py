@@ -24,12 +24,21 @@ class GUI(tk.Tk):
 
         ttk.Label(settings_frame, text="DeepSeek API Key:").pack(side="left", padx=5, pady=5)
         self.api_key_var = tk.StringVar()
-        ttk.Entry(settings_frame, textvariable=self.api_key_var, width=40, show="*").pack(side="left", padx=5)
+        api_entry = ttk.Entry(settings_frame, textvariable=self.api_key_var, width=40, show="*")
+        api_entry.pack(side="left", padx=5)
+        api_entry.bind("<FocusOut>", self._save_config)
 
         ttk.Label(settings_frame, text="Output Directory:").pack(side="left", padx=5, pady=5)
         self.out_dir_var = tk.StringVar()
-        ttk.Entry(settings_frame, textvariable=self.out_dir_var, width=30).pack(side="left", padx=5)
+        out_entry = ttk.Entry(settings_frame, textvariable=self.out_dir_var, width=30)
+        out_entry.pack(side="left", padx=5)
+        out_entry.bind("<FocusOut>", self._save_config)
         ttk.Button(settings_frame, text="Browse", command=self._browse_out_dir).pack(side="left", padx=5)
+
+        # Also save on app exit
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._load_config()
 
         # Main Content area (PanedWindow)
         paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
@@ -84,6 +93,33 @@ class GUI(tk.Tk):
 
         self.log_text = tk.Text(log_frame, state='disabled', height=8)
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+
+    def _load_config(self):
+        try:
+            import json, os
+            if os.path.exists('config.json'):
+                with open('config.json', 'r') as f:
+                    config = json.load(f)
+                    self.api_key_var.set(config.get('api_key', ''))
+                    self.out_dir_var.set(config.get('out_dir', ''))
+        except Exception:
+            pass
+
+    def _save_config(self, *args):
+        try:
+            import json
+            config = {
+                'api_key': self.api_key_var.get(),
+                'out_dir': self.out_dir_var.get()
+            }
+            with open('config.json', 'w') as f:
+                json.dump(config, f)
+        except Exception:
+            pass
+
+    def _on_close(self):
+        self._save_config()
+        self.destroy()
 
     def _browse_out_dir(self):
         dir_path = filedialog.askdirectory()
@@ -176,11 +212,13 @@ class GUI(tk.Tk):
             self._on_pending_select(None)
 
     def log(self, msg):
-        self.log_text.config(state='normal')
-        self.log_text.insert(tk.END, msg + "\n")
-        self.log_text.see(tk.END)
-        self.log_text.config(state='disabled')
-        self.update_idletasks()
+        def _update_log():
+            self.log_text.config(state='normal')
+            self.log_text.insert(tk.END, msg + "\n")
+            self.log_text.see(tk.END)
+            self.log_text.config(state='disabled')
+            self.update_idletasks()
+        self.after(0, _update_log)
 
 class GUILoggingHandler(logging.Handler):
     def __init__(self, gui):
